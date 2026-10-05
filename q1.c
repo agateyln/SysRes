@@ -21,9 +21,11 @@ int main() {
     printf("Address of function in shared library: %p\n", (void*)&printf);
     printf("Address of main: %p\n", (void*)&main);
 
-    char command[64];
-    snprintf(command, sizeof(command), "pmap -X %ld", (long)getpid());
-    system(command);
+    char pid[32];
+    snprintf(pid, sizeof(pid), "%ld", (long)getpid());
+    fflush(stdout);
+    execl("/usr/bin/pmap", "pmap", "-X", pid, (char *)NULL);
+    perror("execl");
     free(heap);
     munmap(mapped, sizeof(int));
     return 0;
