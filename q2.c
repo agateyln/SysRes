@@ -10,7 +10,7 @@ int main(void)
 {
 	const char *filename = "test.txt";
 	int file = open(filename, O_RDWR);
-	if (file == -1)
+	if (file == -1)  //Many checks for each step using files
 		return 1;
 
     struct stat file_stat;
@@ -44,7 +44,7 @@ int main(void)
 	close(file);
 
 	fflush(stdout);
-    int child = fork();
+    int child = fork();  // Fork a child process to execute the cat command
     if (child == -1) {
         perror("fork");
         return 1;
