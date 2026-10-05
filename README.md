@@ -1,1 +1,3 @@
 # SysRes
+
+Agathe JULIEN - Lucas RAVELOARINORO
