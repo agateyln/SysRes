@@ -58,20 +58,44 @@ void remove_last_node(Node **p) {
     }
 }
 
+void add_end_node(Node **p, int value) {
+    Node *new_node=malloc(sizeof(Node));
+    if (!new_node) exit(EXIT_FAILURE); // check for malloc failure
+    new_node->data=value;
+    new_node->next=NULL;
+
+    if (*p==NULL) {
+        *p=new_node;
+    } else {
+        Node *current=*p;
+        while (current->next) {
+            current=current->next;
+        }
+        current->next=new_node;
+    }
+}
+
 int main() {
     for (int i=n-1;i>=0;i--) {
         add_node(&head,i);
     }
+    printf("\n3.2 - Length of the list: %d\n", length(head)); 
     print_list(head);
-    printf("\nLength of the list: %d\n", length(head)); 
 
     remove_first_node(&head);
+    printf("\n3.4 -Length of the list after removing first node: %d\n", length(head));
     print_list(head);
-    printf("\nLength of the list after removing first node: %d\n", length(head));
 
     remove_last_node(&head);
+    printf("\n3.5 -Length of the list after removing last node: %d\n", length(head));
     print_list(head);
-    printf("\nLength of the list after removing last node: %d\n", length(head));
 
+    add_end_node(&head, 99);
+    printf("\n3.6 -Length of the list after adding a node at the end: %d\n", length(head));
+    print_list(head);
+
+    add_node(&head, 100);
+    printf("\n3.7 -Length of the list after adding a node at the beginning: %d\n", length(head));
+    print_list(head);
     return 0;
 }
