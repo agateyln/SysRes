@@ -56,6 +56,6 @@ int main(void)
     else {
         waitpid(child, NULL, 0);
     }
-	return 1;
+	return 0;
 }
 
