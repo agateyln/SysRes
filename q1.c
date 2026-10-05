@@ -25,5 +25,6 @@ int main() {
     snprintf(command, sizeof(command), "pmap -X %ld", (long)getpid());
     system(command);
     free(heap);
+    munmap(mapped, sizeof(int));
     return 0;
 }
