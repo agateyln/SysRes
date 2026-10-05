@@ -20,7 +20,7 @@ void add_node(Node **p,int value) {
 
 void print_list(Node *p) {
     while (p) {
-        printf("%d -> ",p->data);
+        printf("%p %d \n",p,p->data);
         p = p->next;
     }
 }
