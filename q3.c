@@ -34,11 +34,44 @@ int length(Node *p) {
     return count;
 }
 
+void remove_first_node(Node **p) {
+    if (*p) {
+        Node *temp = *p;
+        *p = (*p)->next;
+        free(temp);
+    }
+}
+
+void remove_last_node(Node **p) {
+    if (*p) {
+        if ((*p)->next == NULL) {
+            free(*p);
+            *p = NULL;
+        } else {
+            Node *current = *p;
+            while (current->next->next) {
+                current = current->next;
+            }
+            free(current->next);
+            current->next = NULL;
+        }
+    }
+}
+
 int main() {
     for (int i=n-1;i>=0;i--) {
         add_node(&head,i);
     }
     print_list(head);
-    printf("\nLength of the list: %d\n", length(head));
+    printf("\nLength of the list: %d\n", length(head)); 
+
+    remove_first_node(&head);
+    print_list(head);
+    printf("\nLength of the list after removing first node: %d\n", length(head));
+
+    remove_last_node(&head);
+    print_list(head);
+    printf("\nLength of the list after removing last node: %d\n", length(head));
+
     return 0;
 }
