@@ -23,7 +23,9 @@ int main() {
     printf("Address of function in shared library: %p\n", (void*)&printf);
     printf("Address of main: %p\n", (void*)&main);
 
-    int child = fork();
+    //The addresses are matching the output of the pmap command.
+
+    int child = fork(); // Fork a child process to execute the pmap command
     if (child == -1) {
         perror("fork");
         free(heap);
