@@ -24,7 +24,7 @@ int main() {
     char pid[32];
     snprintf(pid, sizeof(pid), "%ld", (long)getpid());
     fflush(stdout);
-    execl("/usr/bin/pmap", "pmap", "-X", pid, (char *)NULL);
+    execl("/usr/bin/pmap", "pmap", "-X", pid, (char *)NULL); 
     perror("execl");
     free(heap);
     munmap(mapped, sizeof(int));
