@@ -34,19 +34,34 @@ void insert_free_block(HEADER *block){
     }
 }
 
-// function to check if there is a free block in the free list the requested size, if so, return the pointer to the block and remove it from the free list
+// Recherche un bloc libre et le découpe si le reliquat peut former un bloc libre.
 void *check_free_block(size_t size) {
     
     HEADER *previous = NULL;
     HEADER *current = free_list;
 
     while (current) {
-        if (current->bloc_size == size) {
+        if (current->bloc_size >= size) {
             if (previous) { 
                 previous->ptr_next = current->ptr_next; 
             } else {
                 free_list = current->ptr_next; 
             }
+
+            if (current->bloc_size >= size + HEADER_SIZE + TAIL_SIZE + 1) {
+                size_t remaining_size = current->bloc_size - size - HEADER_SIZE - TAIL_SIZE;
+                HEADER *remaining = (HEADER *)((char *)current + HEADER_SIZE + size + TAIL_SIZE);
+                remaining->ptr_next = NULL;
+                remaining->bloc_size = remaining_size;
+                remaining->magic_number = MAGIC_NUMBER;
+                *(unsigned long *)((char *)remaining + HEADER_SIZE + remaining_size) = MAGIC_NUMBER;
+                insert_free_block(remaining);
+            }
+
+            current->bloc_size = size;
+            current->ptr_next = NULL;
+            current->magic_number = MAGIC_NUMBER;
+            *(unsigned long *)((char *)current + HEADER_SIZE + size) = MAGIC_NUMBER;
             return (char *)current + HEADER_SIZE;
         }
         previous = current;
@@ -133,5 +148,16 @@ int main(void){
     printf("recycled block: %p\n", recycled_block);
     printf("heap increase after recycling: %zu bytes\n",
               (size_t)((char *)break_after - (char *)break_before));
+
+    void *large_block = malloc_3is(100);
+    free_3is(large_block);
+    void *split_block = malloc_3is(20);
+    HEADER *remaining = free_list;
+    while (remaining && remaining->bloc_size != 100 - 20 - HEADER_SIZE - TAIL_SIZE) {
+        remaining = remaining->ptr_next;
+    }
+    printf("split block: %p\n", split_block);
+    printf("remaining free size: %zu bytes\n",
+           remaining ? remaining->bloc_size : 0);
     return 0;
 }
