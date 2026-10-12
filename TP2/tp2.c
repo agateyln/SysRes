@@ -34,16 +34,25 @@ void insert_free_block(HEADER *block){
     }
 }
 
-void *malloc_3is (size_t size){
-    if (size == 0) {return NULL;}
-    size_t total_size = size + HEADER_SIZE + TAIL_SIZE;
-    HEADER *p= sbrk(total_size);
-    if (p == (void *)-1) {return NULL;}
-    p->ptr_next = NULL;
-    p->bloc_size = size;
-    p->magic_number = MAGIC_NUMBER;
-    *(unsigned long *)((char *)p + HEADER_SIZE + size) = MAGIC_NUMBER;
-    return (char *)p + HEADER_SIZE;
+// function to check if there is a free block in the free list the requested size, if so, return the pointer to the block and remove it from the free list
+void *check_free_block(size_t size) {
+    
+    HEADER *previous = NULL;
+    HEADER *current = free_list;
+
+    while (current) {
+        if (current->bloc_size == size) {
+            if (previous) { 
+                previous->ptr_next = current->ptr_next; 
+            } else {
+                free_list = current->ptr_next; 
+            }
+            return (char *)current + HEADER_SIZE;
+        }
+        previous = current;
+        current = current->ptr_next;
+    }
+    return NULL; // No suitable block found
 }
 
 int check_magic_numbers(void *ptr){
@@ -55,6 +64,31 @@ int check_magic_numbers(void *ptr){
 
     return *tail == MAGIC_NUMBER;
 }
+
+void *malloc_3is (size_t size){
+    if (size == 0) {return NULL;}
+    void *block = check_free_block(size);
+    if (block) { // if a free block of the requested size is found
+        HEADER *p = (HEADER *)((char *)block - HEADER_SIZE); // get the header of the block
+        p->magic_number = MAGIC_NUMBER; 
+        p->bloc_size = size;
+        p->ptr_next = NULL;
+        *(unsigned long *)((char *)block + size) = MAGIC_NUMBER; // set the magic number at the end of the block
+        return block;
+    } 
+    else {
+        size_t total_size = size + HEADER_SIZE + TAIL_SIZE;
+        HEADER *p= sbrk(total_size);
+        if (p == (void *)-1) {return NULL;}
+        p->ptr_next = NULL;
+        p->bloc_size = size;
+        p->magic_number = MAGIC_NUMBER;
+        *(unsigned long *)((char *)p + HEADER_SIZE + size) = MAGIC_NUMBER;
+        return (char *)p + HEADER_SIZE;
+    }
+}
+
+
 
 void free_3is(void *ptr){
     if (ptr == NULL) {return;}
@@ -92,6 +126,12 @@ int main(void){
         (void *)free_list, (void *)free_list->ptr_next);
     
     
-
+    // test recycling of free blocks
+    void *break_before = sbrk(0);
+    void *recycled_block = malloc_3is(size);
+    void *break_after = sbrk(0);
+    printf("recycled block: %p\n", recycled_block);
+    printf("heap increase after recycling: %zu bytes\n",
+              (size_t)((char *)break_after - (char *)break_before));
     return 0;
 }
