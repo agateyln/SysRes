@@ -15,7 +15,6 @@ typedef struct HEADER_TAG {
 
 HEADER * free_list = NULL; /* pointeur sur le premier bloc libre */
 
-
 void insert_free_block(HEADER *block){
     HEADER *previous = NULL;
     HEADER *current = free_list;
@@ -45,6 +44,24 @@ void insert_free_block(HEADER *block){
         *(unsigned long *)((char *)previous + HEADER_SIZE + previous->bloc_size) = MAGIC_NUMBER;
     }
 }
+
+
+void preallocate(size_t size){
+    if (size == 0 || free_list != NULL) {return;}
+
+    size_t total_size = size + HEADER_SIZE + TAIL_SIZE;
+    HEADER *p = sbrk(total_size);
+    if (p == (void *)-1) {return;}
+
+    p->ptr_next = NULL;
+    p->bloc_size = size;
+    p->magic_number = MAGIC_NUMBER;
+    *(unsigned long *)((char *)p + HEADER_SIZE + size) = MAGIC_NUMBER;
+
+    insert_free_block(p);
+}
+
+
 
 // Recherche un bloc libre et le découpe si le reliquat peut former un bloc libre.
 void *check_free_block(size_t size) {
@@ -130,6 +147,9 @@ void free_3is(void *ptr){
 
 int main(void){
     size_t size = 10;
+    preallocate(256);
+    printf("preallocated free block: %zu bytes\n", free_list ? free_list->bloc_size : 0);
+
     void *before = sbrk(0);
     void *block = malloc_3is(size);
     void *after = sbrk(0);
@@ -144,16 +164,16 @@ int main(void){
     printf("expected: %zu bytes\n",
            size + HEADER_SIZE + TAIL_SIZE);
 
-        void *adjacent_first = malloc_3is(30);
-        void *adjacent_second = malloc_3is(40);
-        free_3is(adjacent_first);
-        free_3is(adjacent_second);
-        HEADER *merged = free_list;
-        while (merged && merged->bloc_size != 30 + HEADER_SIZE + TAIL_SIZE + 40) {
-         merged = merged->ptr_next;
-        }
-        printf("merged adjacent size: %zu bytes\n",
-            merged ? merged->bloc_size : 0);
+    void *adjacent_first = malloc_3is(30);
+    void *adjacent_second = malloc_3is(40);
+    free_3is(adjacent_first);
+    free_3is(adjacent_second);
+    HEADER *merged = free_list;
+    while (merged && merged->bloc_size != 30 + HEADER_SIZE + TAIL_SIZE + 40) {
+        merged = merged->ptr_next;
+    }
+    printf("merged adjacent size: %zu bytes\n",
+        merged ? merged->bloc_size : 0);
 
     void *second_block = malloc_3is(size);
     free_3is(second_block);
