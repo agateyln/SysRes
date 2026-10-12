@@ -109,7 +109,7 @@ int check_magic_numbers(void *ptr){
     return *tail == MAGIC_NUMBER;
 }
 
-void *malloc_3is (size_t size){
+void *malloc (size_t size){
     if (size == 0) {return NULL;}
     void *block = check_free_block(size);
     if (block) { // if a free block of the requested size is found
@@ -134,7 +134,7 @@ void *malloc_3is (size_t size){
 
 
 
-void free_3is(void *ptr){
+void free(void *ptr){
     if (ptr == NULL) {return;}
     HEADER *block = (HEADER *)((char *)ptr - HEADER_SIZE);
     if (!check_magic_numbers(ptr)) {return;}
@@ -151,7 +151,7 @@ int main(void){
     printf("preallocated free block: %zu bytes\n", free_list ? free_list->bloc_size : 0);
 
     void *before = sbrk(0);
-    void *block = malloc_3is(size);
+    void *block = malloc(size);
     void *after = sbrk(0);
 
     printf("before: %p\n", before);
@@ -164,10 +164,10 @@ int main(void){
     printf("expected: %zu bytes\n",
            size + HEADER_SIZE + TAIL_SIZE);
 
-    void *adjacent_first = malloc_3is(30);
-    void *adjacent_second = malloc_3is(40);
-    free_3is(adjacent_first);
-    free_3is(adjacent_second);
+    void *adjacent_first = malloc(30);
+    void *adjacent_second = malloc(40);
+    free(adjacent_first);
+    free(adjacent_second);
     HEADER *merged = free_list;
     while (merged && merged->bloc_size != 30 + HEADER_SIZE + TAIL_SIZE + 40) {
         merged = merged->ptr_next;
@@ -175,26 +175,26 @@ int main(void){
     printf("merged adjacent size: %zu bytes\n",
         merged ? merged->bloc_size : 0);
 
-    void *second_block = malloc_3is(size);
-    free_3is(second_block);
+    void *second_block = malloc(size);
+    free(second_block);
     printf("free list: %p -> %p\n",
         (void *)free_list, (void *)free_list->ptr_next);
-    free_3is(block);
+    free(block);
     printf("free list: %p -> %p\n",
         (void *)free_list, (void *)free_list->ptr_next);
     
     
     // test recycling of free blocks
     void *break_before = sbrk(0);
-    void *recycled_block = malloc_3is(size);
+    void *recycled_block = malloc(size);
     void *break_after = sbrk(0);
     printf("recycled block: %p\n", recycled_block);
     printf("heap increase after recycling: %zu bytes\n",
               (size_t)((char *)break_after - (char *)break_before));
 
-    void *large_block = malloc_3is(100);
-    free_3is(large_block);
-    void *split_block = malloc_3is(20);
+    void *large_block = malloc(100);
+    free(large_block);
+    void *split_block = malloc(20);
     HEADER *remaining = free_list;
     while (remaining && remaining->bloc_size != 100 - 20 - HEADER_SIZE - TAIL_SIZE) {
         remaining = remaining->ptr_next;
