@@ -32,6 +32,18 @@ void insert_free_block(HEADER *block){
     } else {
         free_list = block;
     }
+
+    if (current && (char *)block + HEADER_SIZE + block->bloc_size + TAIL_SIZE == (char *)current) {
+        block->bloc_size += HEADER_SIZE + TAIL_SIZE + current->bloc_size;
+        block->ptr_next = current->ptr_next;
+        *(unsigned long *)((char *)block + HEADER_SIZE + block->bloc_size) = MAGIC_NUMBER;
+    }
+
+    if (previous && (char *)previous + HEADER_SIZE + previous->bloc_size + TAIL_SIZE == (char *)block) {
+        previous->bloc_size += HEADER_SIZE + TAIL_SIZE + block->bloc_size;
+        previous->ptr_next = block->ptr_next;
+        *(unsigned long *)((char *)previous + HEADER_SIZE + previous->bloc_size) = MAGIC_NUMBER;
+    }
 }
 
 // Recherche un bloc libre et le découpe si le reliquat peut former un bloc libre.
@@ -131,6 +143,17 @@ int main(void){
 
     printf("expected: %zu bytes\n",
            size + HEADER_SIZE + TAIL_SIZE);
+
+        void *adjacent_first = malloc_3is(30);
+        void *adjacent_second = malloc_3is(40);
+        free_3is(adjacent_first);
+        free_3is(adjacent_second);
+        HEADER *merged = free_list;
+        while (merged && merged->bloc_size != 30 + HEADER_SIZE + TAIL_SIZE + 40) {
+         merged = merged->ptr_next;
+        }
+        printf("merged adjacent size: %zu bytes\n",
+            merged ? merged->bloc_size : 0);
 
     void *second_block = malloc_3is(size);
     free_3is(second_block);
