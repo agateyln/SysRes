@@ -46,13 +46,23 @@ void *malloc_3is (size_t size){
     return (char *)p + HEADER_SIZE;
 }
 
+int check_magic_numbers(void *ptr){
+    if (ptr == NULL) {return 0;}
+
+    HEADER *block = (HEADER *)((char *)ptr - HEADER_SIZE);
+    if (block->magic_number != MAGIC_NUMBER) {return 0;}
+    unsigned long *tail = (unsigned long *)((char *)ptr + block->bloc_size);
+
+    return *tail == MAGIC_NUMBER;
+}
+
 void free_3is(void *ptr){
     if (ptr == NULL) {return;}
     HEADER *block = (HEADER *)((char *)ptr - HEADER_SIZE);
-    if (block->magic_number != MAGIC_NUMBER) {return;}
-    if (*(unsigned long *)((char *)ptr + block->bloc_size) != MAGIC_NUMBER) {return;}
+    if (!check_magic_numbers(ptr)) {return;}
     insert_free_block(block);
 }
+
 
 
 
@@ -75,10 +85,13 @@ int main(void){
 
     void *second_block = malloc_3is(size);
     free_3is(second_block);
+    printf("free list: %p -> %p\n",
+        (void *)free_list, (void *)free_list->ptr_next);
     free_3is(block);
     printf("free list: %p -> %p\n",
         (void *)free_list, (void *)free_list->ptr_next);
-
+    
+    
 
     return 0;
 }
