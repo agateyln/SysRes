@@ -9,7 +9,7 @@
 int main(int argc, char *argv[])
 {
     // open the file
-    int fd=open("test_tosfs_files",O_RDWR); 
+    int fd=open("test_tosfs_files.test",O_RDWR); 
     if (fd<0) { 
         perror("open");
         return 1;

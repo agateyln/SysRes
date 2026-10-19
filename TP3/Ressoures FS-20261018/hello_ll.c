@@ -191,19 +191,139 @@ static void hello_ll_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 	reply_buf_limited(req, data, inode_cache[ino].size, off, size);
 }
 
+// function to set the attributes of a file in the filesystem given its inode number and the attributes
+static void hello_ll_setattr(fuse_req_t req, fuse_ino_t ino,struct stat *attr, int to_set,struct fuse_file_info *fi)
+{
+	(void) fi;
+
+	if (hello_stat(ino, attr) == -1) { // check if the inode number is valid 
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	// check if the attributes to set are valid (atime and mtime only)
+	if (to_set & ~(FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME | FUSE_SET_ATTR_ATIME_NOW | FUSE_SET_ATTR_MTIME_NOW)) {
+		fuse_reply_err(req, EOPNOTSUPP);
+		return;
+	}
+	fuse_reply_attr(req, attr, 1.0);
+}
+
+
+// function to create a new file in the filesystem given its parent inode number, its name and its mode
+static void hello_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,mode_t mode, struct fuse_file_info *fi) {
+	(void) fi;
+
+	// check if the parent inode number is valid (exists and is a directory)
+	if (parent==0 || parent>sb->inodes || !((sb->inode_bitmap>>parent)&1) || (inode_cache[parent].mode & S_IFMT)!=S_IFDIR) {
+		fuse_reply_err(req,ENOENT);
+		return;
+	}
+
+	// check if the name is valid (not empty, not too long)
+	if (strlen(name)==0 || strlen(name)>=TOSFS_MAX_NAME_LENGTH) {
+		fuse_reply_err(req,EINVAL);
+		return;
+	}
+
+	// check if the name already exists in the parent directory
+	struct tosfs_dentry *dentry_cache=(struct tosfs_dentry *)((char *)fs_init + inode_cache[parent].block_no*TOSFS_BLOCK_SIZE);
+	size_t dentry_count=TOSFS_BLOCK_SIZE/sizeof(*dentry_cache);
+	for (size_t i=0;i<dentry_count;i++) {
+		if (dentry_cache[i].inode!=0 && strncmp(name,dentry_cache[i].name,TOSFS_MAX_NAME_LENGTH)==0) {
+			fuse_reply_err(req,EEXIST);
+			return;
+		}
+	}
+
+	// find a free inode in the inode bitmap
+	int new_inode=-1;
+	for (unsigned i=1; i<=sb->inodes; i++) {
+		if (!((sb->inode_bitmap>>i)&1)) {
+			new_inode=(int)i;
+			break;
+		}
+	}
+	if (new_inode==-1) { // if no free inode, reply with error no space left
+		fuse_reply_err(req,ENOSPC);
+		return;
+	}
+
+	// find a free block in the block bitmap
+	int new_block=-1;
+	for (unsigned i=0; i<sb->blocks; i++) {
+		if (!((sb->block_bitmap>>i)&1)) {
+			new_block=(int)i;
+			break;
+		}
+	}
+	if (new_block==-1) { // if no free block, reply with error no space left
+		fuse_reply_err(req,ENOSPC);
+		return;
+	}
+
+	// find a free dentry in the parent directory
+	int new_dentry=-1;
+	for (size_t i=0;i<dentry_count;i++) {
+		if (dentry_cache[i].inode==0) { // if the dentry is free, use it
+			new_dentry=i;
+			break;
+		}
+	}
+	if (new_dentry==-1) { // if no free dentry, reply with error no space left
+		fuse_reply_err(req,ENOSPC);
+		return;
+	}
+
+	// create the new inode in the inode cache
+	inode_cache[new_inode].inode=new_inode;
+	inode_cache[new_inode].block_no=new_block;
+	inode_cache[new_inode].size=0;
+	inode_cache[new_inode].nlink=1;
+	inode_cache[new_inode].mode=S_IFREG | (mode & 07777);
+	inode_cache[new_inode].perm=mode & 07777;
+
+	// set the user id and group id of the new inode to the current user and group
+	inode_cache[new_inode].uid=getuid();
+	inode_cache[new_inode].gid=getgid();
+
+	sb->inode_bitmap|=(1<<new_inode); // update the inode bitmap to mark the new inode as used
+	sb->block_bitmap|=(1<<new_block); // update the block bitmap to mark the new block as used
+	dentry_cache[new_dentry].inode=new_inode; // update the dentry to mark it as used
+	strncpy(dentry_cache[new_dentry].name,name,TOSFS_MAX_NAME_LENGTH); // copy the name of the new file to the dentry
+
+	// reply with the new inode information
+	struct fuse_entry_param e;
+	memset(&e,0,sizeof(e));
+	e.ino=new_inode;
+	e.attr_timeout=1.0;
+	e.entry_timeout=1.0;
+	if (hello_stat(e.ino,&e.attr)==-1) { // check if the new inode number is valid
+		fuse_reply_err(req,ENOENT);
+		return;
+	}
+	fuse_reply_create(req,&e,fi);
+	// print the creation of the new file
+	printf("Created new file: %s (inode %d, block %d) in directory inode %lu\n",name,new_inode,new_block,parent);
+}
+
+
+
 static struct fuse_lowlevel_ops hello_ll_oper = {
 	.lookup		= hello_ll_lookup,
 	.getattr	= hello_ll_getattr,
 	.readdir	= hello_ll_readdir,
 	.open		= hello_ll_open,
 	.read		= hello_ll_read,
+	.setattr	= hello_ll_setattr,
+	.create = hello_ll_create,
+	//.dir_add = hello_ll_dir_add,
 };
-
 
 static int load_fs()
 {
 	// open the file
-	int fd=open("test_tosfs_files",O_RDWR);
+	int fd=open("test_tosfs_files.test", O_RDWR);
 	if (fd<0) {
 		perror("open");
 		return -1;
@@ -233,6 +353,9 @@ static int load_fs()
 		fprintf(stderr,"Invalid magic number: 0x%x\n",sb->magic);
 		return -1;
 	}
+
+	// set bigger number of inodes available in the superblock to test the creation of new files
+	sb->inodes=6;
 
 	// get the inode cache
 	inode_cache=(struct tosfs_inode *)((char *)fs_init + TOSFS_INODE_BLOCK*TOSFS_BLOCK_SIZE);
