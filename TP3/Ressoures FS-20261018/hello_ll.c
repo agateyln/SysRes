@@ -26,9 +26,6 @@ static void *fs_init; // pointer to the filesystem image
 static size_t fs_size;
 static struct tosfs_superblock *sb; // pointer to the superblock
 
-static const char *hello_str = "Hello World!\n";
-static const char *hello_name = "hello";
-
 static int hello_stat(fuse_ino_t ino, struct stat *stbuf) 
 {
 	// checks if the inode number is valid
@@ -59,21 +56,38 @@ static void hello_ll_getattr(fuse_req_t req, fuse_ino_t ino,
 		fuse_reply_attr(req, &stbuf, 1.0); 
 }
 
+// function to lookup a file in the filesystem given its parent inode number and its name
 static void hello_ll_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-	struct fuse_entry_param e;
+	struct fuse_entry_param e; // structure to store the information of the file to be looked up
 
-	if (parent != 1 || strcmp(name, hello_name) != 0)
+	// check if the parent inode number is valid (it exists and is a directory)
+	if (parent == 0 || parent > sb->inodes || !((sb->inode_bitmap >> parent) & 1) || (inode_cache[parent].mode & S_IFMT) != S_IFDIR) {
 		fuse_reply_err(req, ENOENT);
-	else {
-		memset(&e, 0, sizeof(e));
-		e.ino = 2; 
-		e.attr_timeout = 1.0;
-		e.entry_timeout = 1.0;
-		hello_stat(e.ino, &e.attr);
-
-		fuse_reply_entry(req, &e);
+		return;
 	}
+
+	// get the dentry cache for the parent directory
+	struct tosfs_dentry *dentry_cache = (struct tosfs_dentry *)((char *)fs_init + inode_cache[parent].block_no * TOSFS_BLOCK_SIZE);
+	// get the number of dentries in the parent directory
+	size_t dentry_count = TOSFS_BLOCK_SIZE / sizeof(*dentry_cache);
+
+	// go through dentry cache to find the file with the given name
+	for (size_t i = 0; i < dentry_count; i++) {
+		if (dentry_cache[i].inode != 0 && strncmp(name, dentry_cache[i].name, TOSFS_MAX_NAME_LENGTH) == 0) {
+			memset(&e, 0, sizeof(e)); 
+			e.ino = dentry_cache[i].inode; // set the inode number of the file to be looked up
+			e.attr_timeout = 1.0;
+			e.entry_timeout = 1.0;
+			if (hello_stat(e.ino, &e.attr) == -1) { // check if the inode number of the file to be looked up is valid
+				fuse_reply_err(req, ENOENT);
+				return;
+			}
+			fuse_reply_entry(req, &e); // reply with the information of the file to be looked up
+			return;
+		}
+	}
+	fuse_reply_err(req, ENOENT);
 }
 
 struct dirbuf {
@@ -99,50 +113,82 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
 static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 			     off_t off, size_t maxsize)
 {
-	if (off < bufsize)
+	if (off >= 0 && (size_t) off < bufsize)
 		return fuse_reply_buf(req, buf + off,
 				      min(bufsize - off, maxsize));
 	else
 		return fuse_reply_buf(req, NULL, 0);
 }
 
+
+// function hello_ll_readdir to read the content of a directory in the filesystem
 static void hello_ll_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 			     off_t off, struct fuse_file_info *fi)
 {
 	(void) fi;
 
-	if (ino != 1)
-		fuse_reply_err(req, ENOTDIR);
-	else {
-		struct dirbuf b;
-
-		memset(&b, 0, sizeof(b));
-		dirbuf_add(req, &b, ".", 1);
-		dirbuf_add(req, &b, "..", 1);
-		dirbuf_add(req, &b, hello_name, 2);
-		reply_buf_limited(req, b.p, b.size, off, size);
-		free(b.p);
+	// check if the inode number is valid (it exists and is a directory)
+	if (ino == 0 || ino > sb->inodes ||
+	    !((sb->inode_bitmap >> ino) & 1)) {
+		fuse_reply_err(req, ENOENT);
+		return;
 	}
+	// check if the inode number is a directory
+	if ((inode_cache[ino].mode & S_IFMT) != S_IFDIR) {
+		fuse_reply_err(req, ENOTDIR);
+		return;
+	}
+
+	// Create a buffer to store the directory entries.
+	struct dirbuf b;
+	memset(&b, 0, sizeof(b));
+
+	// get the dentry cache for the directory
+	struct tosfs_dentry *dentry_cache = (struct tosfs_dentry *)((char *)fs_init + inode_cache[ino].block_no * TOSFS_BLOCK_SIZE);
+	size_t dentry_count = TOSFS_BLOCK_SIZE / sizeof(*dentry_cache);
+	for (size_t i = 0; i < dentry_count; i++) {
+		if (dentry_cache[i].inode != 0) {
+			dirbuf_add(req, &b, dentry_cache[i].name, dentry_cache[i].inode);
+		}
+	}
+	reply_buf_limited(req, b.p, b.size, off, size);
+	free(b.p);
 }
+
 
 static void hello_ll_open(fuse_req_t req, fuse_ino_t ino,
 			  struct fuse_file_info *fi)
 {
-	if (ino != 2)
+	// check if inode number is valid (it exists and is a file)
+	if (ino == 0 || ino > sb->inodes || !((sb->inode_bitmap >> ino) & 1)) 
+		fuse_reply_err(req, ENOENT);
+	else if ((inode_cache[ino].mode & S_IFMT) == S_IFDIR) // check if inode number is a directory
 		fuse_reply_err(req, EISDIR);
-	else if ((fi->flags & 3) != O_RDONLY)
+	else if ((fi->flags & 3) != O_RDONLY) // check if the file is opened in read-only
 		fuse_reply_err(req, EACCES);
-	else
+	else // if all checks passed, reply with the file information
 		fuse_reply_open(req, fi);
 }
+
 
 static void hello_ll_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 			  off_t off, struct fuse_file_info *fi)
 {
 	(void) fi;
+	// check if inode number is valid (exists and is a file)
+	if (ino == 0 || ino > sb->inodes || !((sb->inode_bitmap >> ino) & 1)) {
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+	// check if inode number is a regular file (not a directory)
+	if ((inode_cache[ino].mode & S_IFMT) != S_IFREG) { 
+		fuse_reply_err(req, EISDIR); 
+		return;
+	}
 
-	assert(ino == 2);
-	reply_buf_limited(req, hello_str, strlen(hello_str), off, size);
+	// get the data of the file from the filesystem image
+	const char *data = (const char *)fs_init + inode_cache[ino].block_no * TOSFS_BLOCK_SIZE;
+	reply_buf_limited(req, data, inode_cache[ino].size, off, size);
 }
 
 static struct fuse_lowlevel_ops hello_ll_oper = {
