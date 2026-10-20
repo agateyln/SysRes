@@ -328,8 +328,6 @@ static void hello_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 		return;
 	}
 	fuse_reply_create(req,&e,fi);
-	// print the creation of the new file
-	printf("Created new file: %s (inode %d, block %d) in directory inode %lu\n",name,new_inode,new_block,parent);
 }
 
 
@@ -365,7 +363,6 @@ static void hello_ll_write(fuse_req_t req, fuse_ino_t ino, const char *buf, size
 		inode_cache[ino].size=off+size;
 	}
 }
-// to test the write function: echo "Hello World" > /path/to/mountpoint/newfile.txt
 
 
 static struct fuse_lowlevel_ops hello_ll_oper = {
