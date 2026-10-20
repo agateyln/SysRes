@@ -26,6 +26,17 @@ static void *fs_init; // pointer to the filesystem image
 static size_t fs_size;
 static struct tosfs_superblock *sb; // pointer to the superblock
 
+
+// function to check if a block is referenced by any inode in the inode cache: avoid using a block that is already used by another file when creating a new file
+static int block_is_referenced(unsigned block_no)
+{
+	for (unsigned i = 1; i <= sb->inodes; i++) { 
+		if (((sb->inode_bitmap >> i) & 1) && inode_cache[i].block_no == block_no) 
+			return 1;
+	}
+	return 0;
+}
+
 static int hello_stat(fuse_ino_t ino, struct stat *stbuf) 
 {
 	// checks if the inode number is valid
@@ -164,9 +175,7 @@ static void hello_ll_open(fuse_req_t req, fuse_ino_t ino,
 		fuse_reply_err(req, ENOENT);
 	else if ((inode_cache[ino].mode & S_IFMT) == S_IFDIR) // check if inode number is a directory
 		fuse_reply_err(req, EISDIR);
-	else if ((fi->flags & 3) != O_RDONLY) // check if the file is opened in read-only
-		fuse_reply_err(req, EACCES);
-	else // if all checks passed, reply with the file information
+	else // check if inode number is a regular file
 		fuse_reply_open(req, fi);
 }
 
@@ -191,7 +200,7 @@ static void hello_ll_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 	reply_buf_limited(req, data, inode_cache[ino].size, off, size);
 }
 
-// function to set the attributes of a file in the filesystem given its inode number and the attributes
+// function to set the attributes of a file in the filesystem given its inode number and the attributes: needed for the functions hello_ll_create and hello_ll_write
 static void hello_ll_setattr(fuse_req_t req, fuse_ino_t ino,struct stat *attr, int to_set,struct fuse_file_info *fi)
 {
 	(void) fi;
@@ -201,12 +210,28 @@ static void hello_ll_setattr(fuse_req_t req, fuse_ino_t ino,struct stat *attr, i
 		return;
 	}
 
-	// check if the attributes to set are valid (atime and mtime only)
-	if (to_set & ~(FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME | FUSE_SET_ATTR_ATIME_NOW | FUSE_SET_ATTR_MTIME_NOW)) {
+	if (to_set & FUSE_SET_ATTR_SIZE) { // check if the size attribute is to be set
+		// check if the inode number is a regular file, size is valid (not negative and not bigger than block size)
+		if ((inode_cache[ino].mode & S_IFMT) != S_IFREG || attr->st_size < 0 || (uintmax_t) attr->st_size > TOSFS_BLOCK_SIZE) {
+			fuse_reply_err(req, EINVAL);
+			return;
+		}
+		inode_cache[ino].size = (__u16) attr->st_size; // set the size attribute of the inode in the inode cache
+	}
+
+	// TOSFS does not persist timestamps, but accepts timestamp-only updates
+	if (to_set & ~(FUSE_SET_ATTR_SIZE | FUSE_SET_ATTR_ATIME |
+		      FUSE_SET_ATTR_MTIME | FUSE_SET_ATTR_ATIME_NOW |
+		      FUSE_SET_ATTR_MTIME_NOW)) {
 		fuse_reply_err(req, EOPNOTSUPP);
 		return;
 	}
-	fuse_reply_attr(req, attr, 1.0);
+
+	if (hello_stat(ino, attr) == -1) { // check if the inode number is valid after setting the attributes
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+	fuse_reply_attr(req, attr, 1.0); // reply with attributes of the inode after setting
 }
 
 
@@ -252,7 +277,7 @@ static void hello_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 	// find a free block in the block bitmap
 	int new_block=-1;
 	for (unsigned i=0; i<sb->blocks; i++) {
-		if (!((sb->block_bitmap>>i)&1)) {
+		if (!((sb->block_bitmap>>i)&1) && !block_is_referenced(i)) { // check if the block is free and not referenced by any inode
 			new_block=(int)i;
 			break;
 		}
@@ -308,6 +333,40 @@ static void hello_ll_create(fuse_req_t req, fuse_ino_t parent, const char *name,
 }
 
 
+// function to write data in a file in the filesystem given its inode number, the data to write, the size of the data and the offset
+static void hello_ll_write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi) {
+	(void) fi;
+
+	// check if the inode number is valid (exists and is a file)
+	if (ino==0 || ino>sb->inodes || !((sb->inode_bitmap>>ino)&1) || (inode_cache[ino].mode & S_IFMT)!=S_IFREG) {
+		fuse_reply_err(req,ENOENT);
+		return;
+	}
+
+	// check if the offset is valid (not negative and not bigger than the block size)
+	if (off<0 || off>=TOSFS_BLOCK_SIZE) {
+		fuse_reply_err(req,EINVAL); // error invalid argument
+		return;
+	}
+
+	// check if the size is valid (not negative and not bigger than the block size minus the offset)
+	if (off > TOSFS_BLOCK_SIZE || size > TOSFS_BLOCK_SIZE - (size_t)off) {
+		fuse_reply_err(req,EINVAL);
+		return;
+	}
+
+	// write the data in the file
+	char *data=(char *)fs_init + inode_cache[ino].block_no*TOSFS_BLOCK_SIZE; // get the pointer to the data of the file in the image
+	memcpy(data+off,buf,size); // copy the data to the file at the given offset
+	fuse_reply_write(req,size); // reply with the number of bytes written
+
+	// update the size of the file in the inode cache
+	if (off+size>inode_cache[ino].size) {
+		inode_cache[ino].size=off+size;
+	}
+}
+// to test the write function: echo "Hello World" > /path/to/mountpoint/newfile.txt
+
 
 static struct fuse_lowlevel_ops hello_ll_oper = {
 	.lookup		= hello_ll_lookup,
@@ -317,7 +376,7 @@ static struct fuse_lowlevel_ops hello_ll_oper = {
 	.read		= hello_ll_read,
 	.setattr	= hello_ll_setattr,
 	.create = hello_ll_create,
-	//.dir_add = hello_ll_dir_add,
+	.write = hello_ll_write,
 };
 
 static int load_fs()
@@ -359,6 +418,12 @@ static int load_fs()
 
 	// get the inode cache
 	inode_cache=(struct tosfs_inode *)((char *)fs_init + TOSFS_INODE_BLOCK*TOSFS_BLOCK_SIZE);
+
+	// update the block bitmap to mark the blocks used by the inodes as used 
+	for (unsigned i = 1; i <= sb->inodes; i++) {
+		if (((sb->inode_bitmap >> i) & 1) && inode_cache[i].block_no < sb->blocks) // check if the inode is used and the block number is valid
+			sb->block_bitmap |= 1u << inode_cache[i].block_no; // set the bit corresponding to the block number of the inode in the block bitmap
+	}
 	return 0;
 }
 
