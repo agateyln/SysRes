@@ -1,10 +1,10 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -g -MMD -MP
-LDFLAGS = -L.
-LDLIBS  = -lseg
+LDFLAGS =
+LDLIBS  =
 
 TARGET  = client
-SRC     = client.c
+SRC     = client.c sem.c
 OBJ     = $(SRC:.c=.o)
 DEPS    = $(OBJ:.o=.d)
 
